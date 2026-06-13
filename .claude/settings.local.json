@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__zai-mcp-server__ui_to_artifact",
+      "Bash(php artisan:*)",
+      "Bash(findstr \"8080\")",
+      "Bash(curl:*)",
+      "Bash(cd:*)",
+      "Bash(php -r \"echo ''PHP Version: '' . PHP_VERSION . PHP_EOL;\")"
+    ]
+  }
+}
