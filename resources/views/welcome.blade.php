@@ -299,7 +299,7 @@
         /* Relay Grid */
         .relay-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 15px;
             padding: 10px;
         }
@@ -577,9 +577,15 @@
             .grid-row {
                 grid-template-columns: repeat(2, 1fr);
             }
+            .relay-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
         @media (max-width: 768px) {
             .grid-row, .grid-row-2 {
+                grid-template-columns: 1fr;
+            }
+            .relay-grid {
                 grid-template-columns: 1fr;
             }
             .header {
@@ -698,6 +704,13 @@
                         </span>
                         <div class="relay-toggle"></div>
                     </div>
+                    <div class="relay-item" data-relay="r3" onclick="toggleRelay('r3')">
+                        <span class="relay-name">
+                            <span class="relay-icon"><i class="fas fa-fire"></i></span>
+                            heater 3
+                        </span>
+                        <div class="relay-toggle"></div>
+                    </div>
                 </div>
             </div>
 
@@ -770,7 +783,7 @@
     </div>
 
     <script>
-        let relayStates = { r1: 0, r2: 0 };  // 0 = OFF, 1 = ON
+        let relayStates = { r1: 0, r2: 0, r3: 0 };  // 0 = OFF, 1 = ON
         let fanState = false;
         let fanSpeed = 0;
         let timerRunning = false;

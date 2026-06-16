@@ -9,15 +9,30 @@ use Illuminate\Support\Facades\DB;
 
 class RelayController extends Controller
 {
+    private function defaultRelayStates(): array
+    {
+        return [
+            'r1' => 0,
+            'r2' => 0,
+            'r3' => 0,
+        ];
+    }
+
+    private function getRelayStates(): array
+    {
+        return array_merge(
+            $this->defaultRelayStates(),
+            Cache::get('relay_states', [])
+        );
+    }
+
     /**
      * Get sensor data (ESP32 & Frontend polling this endpoint)
      */
     public function getSensorData()
     {
         // Ambil relay states dari cache
-        $relayStates = Cache::get('relay_states', [
-            'r1' => 0, 'r2' => 0
-        ]);
+        $relayStates = $this->getRelayStates();
 
         // Fan command state
         $fanState = Cache::get('fan_state', false);
@@ -49,13 +64,14 @@ class RelayController extends Controller
             $data = $request->validate([
                 'r1' => 'required|integer|in:0,1',
                 'r2' => 'required|integer|in:0,1',
+                'r3' => 'required|integer|in:0,1',
             ]);
 
             // Simpan ke database tabel relay_status
             DB::table('relay_status')->insert([
                 'r1' => $data['r1'],
                 'r2' => $data['r2'],
-                'r3' => 0,
+                'r3' => $data['r3'],
                 'r4' => 0,
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -207,9 +223,7 @@ class RelayController extends Controller
                 'timestamp' => now()->toDateTimeString()
             ];
 
-            $relayStates = Cache::get('relay_states', [
-                'r1' => 0, 'r2' => 0
-            ]);
+            $relayStates = $this->getRelayStates();
 
             $fanState = Cache::get('fan_state', false);
             $fanSpeed = Cache::get('fan_speed', 0);

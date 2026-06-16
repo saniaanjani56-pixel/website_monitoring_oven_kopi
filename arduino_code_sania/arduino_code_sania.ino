@@ -1,17 +1,20 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <DHT.h>
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
 
 // ==================== WIFI CREDENTIALS ====================
-const char* ssid = "sania";
+const char* ssid = "CYCLONE";
 const char* password = "12341234";
 
-// ==================== LARAVEL SERVER ====================
-const char* laravelBaseUrl = "http://192.168.116.180:8000";
+// ==================== LARAVEL SERVER HTTPS ====================
+// Domain Laravel kamu
+const char* laravelBaseUrl = "https://monitoring-oven-kopi.my.id";
 
+// Endpoint Laravel
 const char* sensorDataEndpoint = "/api/sensor-data";
 const char* sensorsEndpoint    = "/api/sensors";
 const char* pingEndpoint       = "/api/ping";
@@ -21,7 +24,7 @@ const char* pingEndpoint       = "/api/ping";
 #define USE_DHT true
 
 // ==================== HTTP SETTING ====================
-const unsigned long HTTP_TIMEOUT = 3000;
+const unsigned long HTTP_TIMEOUT = 8000;
 const unsigned long HTTP_COOLDOWN_AFTER_FAIL = 5000;
 
 bool httpBusy = false;
@@ -57,6 +60,7 @@ const unsigned long LCD_UPDATE_INTERVAL = 1000;
 // ==================== RELAY PINS ====================
 const int relay1 = 32;
 const int relay2 = 33;
+const int relay3 = 25; // Ubah sesuai wiring heater 3 jika memakai pin lain.
 
 // RELAY AKTIF HIGH
 #define RELAY_ON  HIGH
@@ -66,8 +70,6 @@ const int relay2 = 33;
 const int buzzerPin = 26;
 
 // BUZZER ACTIVE LOW
-// LOW  = bunyi
-// HIGH = mati
 #define BUZZER_ON  LOW
 #define BUZZER_OFF HIGH
 
@@ -76,7 +78,6 @@ const float TEMP_LIMIT = 65.0;
 bool overTempAlarm = false;
 
 // ==================== L298N MOTOR DRIVER PINS ====================
-// MOTOR FAN
 const int mtr2_in3 = 4;
 const int mtr2_in4 = 18;
 const int fan_enb  = 23;
@@ -100,9 +101,10 @@ const unsigned long SENSOR_SEND_INTERVAL_FAN_ON = 20000;
 struct RelayStates {
   bool r1;
   bool r2;
+  bool r3;
 };
 
-RelayStates relayStates = {false, false};
+RelayStates relayStates = {false, false, false};
 
 // ==================== MOTOR STATES ====================
 struct MotorStates {
@@ -146,18 +148,21 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("=== ESP32 Monitoring System FIXED + ACTIVE LOW BUZZER ===");
+  Serial.println("=== ESP32 Monitoring Oven Kopi HTTPS ===");
   Serial.println("Starting...");
 
   // ==================== RELAY INIT ====================
   pinMode(relay1, OUTPUT);
   pinMode(relay2, OUTPUT);
+  pinMode(relay3, OUTPUT);
 
   digitalWrite(relay1, RELAY_OFF);
   digitalWrite(relay2, RELAY_OFF);
+  digitalWrite(relay3, RELAY_OFF);
 
   relayStates.r1 = false;
   relayStates.r2 = false;
+  relayStates.r3 = false;
 
   Serial.println("Relay initialized, ACTIVE HIGH, all OFF");
 
@@ -247,7 +252,7 @@ void connectWiFiNoRestart() {
 
   unsigned long startAttempt = millis();
 
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
     delay(300);
     Serial.print(".");
     yield();
@@ -338,9 +343,11 @@ void readSensors() {
 void setAllRelaysOff() {
   digitalWrite(relay1, RELAY_OFF);
   digitalWrite(relay2, RELAY_OFF);
+  digitalWrite(relay3, RELAY_OFF);
 
   relayStates.r1 = false;
   relayStates.r2 = false;
+  relayStates.r3 = false;
 }
 
 // ==================== OVER TEMPERATURE SAFETY ====================
@@ -355,15 +362,12 @@ void handleOverTemperature() {
     if (!overTempAlarm) {
       Serial.println("!!! OVER TEMPERATURE DETECTED !!!");
       Serial.println("Temperature above 65 C");
-      Serial.println("Relay 1 OFF, Relay 2 OFF, Buzzer ON");
+      Serial.println("Relay 1 OFF, Relay 2 OFF, Relay 3 OFF, Buzzer ON");
     }
 
     overTempAlarm = true;
 
-    // Paksa relay mati
     setAllRelaysOff();
-
-    // Buzzer ON karena active LOW
     digitalWrite(buzzerPin, BUZZER_ON);
 
   } else {
@@ -373,8 +377,6 @@ void handleOverTemperature() {
     }
 
     overTempAlarm = false;
-
-    // Buzzer OFF karena active LOW
     digitalWrite(buzzerPin, BUZZER_OFF);
   }
 }
@@ -417,14 +419,25 @@ void handleHttpResult(int code) {
   }
 }
 
+// ==================== HTTPS GET ====================
 int httpGET(String url, String &response) {
+  WiFiClientSecure client;
+
+  // Untuk project skripsi / testing:
+  // ini membuat ESP32 tidak perlu memasukkan sertifikat SSL manual
+  client.setInsecure();
+
   HTTPClient http;
 
   http.setReuse(false);
   http.setTimeout(HTTP_TIMEOUT);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-  if (!http.begin(url)) {
-    Serial.println("HTTP begin failed");
+  Serial.print("GET URL: ");
+  Serial.println(url);
+
+  if (!http.begin(client, url)) {
+    Serial.println("HTTPS GET begin failed");
     return -99;
   }
 
@@ -435,6 +448,15 @@ int httpGET(String url, String &response) {
 
   if (code > 0) {
     response = http.getString();
+
+    Serial.print("GET Status: ");
+    Serial.println(code);
+
+    Serial.print("GET Response: ");
+    Serial.println(response);
+  } else {
+    Serial.print("GET Error: ");
+    Serial.println(code);
   }
 
   http.end();
@@ -444,14 +466,27 @@ int httpGET(String url, String &response) {
   return code;
 }
 
+// ==================== HTTPS POST ====================
 int httpPOST(String url, String payload, String &response) {
+  WiFiClientSecure client;
+
+  // Untuk HTTPS tanpa sertifikat manual
+  client.setInsecure();
+
   HTTPClient http;
 
   http.setReuse(false);
   http.setTimeout(HTTP_TIMEOUT);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-  if (!http.begin(url)) {
-    Serial.println("HTTP begin failed");
+  Serial.print("POST URL: ");
+  Serial.println(url);
+
+  Serial.print("POST Payload: ");
+  Serial.println(payload);
+
+  if (!http.begin(client, url)) {
+    Serial.println("HTTPS POST begin failed");
     return -99;
   }
 
@@ -463,6 +498,15 @@ int httpPOST(String url, String payload, String &response) {
 
   if (code > 0) {
     response = http.getString();
+
+    Serial.print("POST Status: ");
+    Serial.println(code);
+
+    Serial.print("POST Response: ");
+    Serial.println(response);
+  } else {
+    Serial.print("POST Error: ");
+    Serial.println(code);
   }
 
   http.end();
@@ -562,7 +606,7 @@ void sendSensorData() {
   if (code > 0) {
     Serial.printf("Sensor data sent, status: %d\n", code);
   } else {
-    Serial.printf("Send data HTTP error: %d\n", code);
+    Serial.printf("Send data HTTPS error: %d\n", code);
   }
 
   httpBusy = false;
@@ -575,7 +619,6 @@ void checkRelayCommands() {
     return;
   }
 
-  // Kalau suhu lebih dari 65, relay tidak boleh ON dari server
   if (overTempAlarm) {
     Serial.println("Over temperature active, server relay command ignored");
     setAllRelaysOff();
@@ -597,9 +640,11 @@ void checkRelayCommands() {
 
     int newState1 = getJsonInt(response, "r1", relayStates.r1 ? 1 : 0);
     int newState2 = getJsonInt(response, "r2", relayStates.r2 ? 1 : 0);
+    int newState3 = getJsonInt(response, "r3", relayStates.r3 ? 1 : 0);
 
     newState1 = newState1 ? 1 : 0;
     newState2 = newState2 ? 1 : 0;
+    newState3 = newState3 ? 1 : 0;
 
     if ((bool)newState1 != relayStates.r1) {
       relayStates.r1 = newState1;
@@ -613,6 +658,12 @@ void checkRelayCommands() {
       Serial.printf("Relay 2: %s\n", relayStates.r2 ? "ON" : "OFF");
     }
 
+    if ((bool)newState3 != relayStates.r3) {
+      relayStates.r3 = newState3;
+      digitalWrite(relay3, relayStates.r3 ? RELAY_ON : RELAY_OFF);
+      Serial.printf("Relay 3: %s\n", relayStates.r3 ? "ON" : "OFF");
+    }
+
     bool newFanState = getJsonBool(response, "fan_state", motorStates.fan);
     int newFanSpeed = getJsonInt(response, "fan_speed", motorStates.fanSpeed);
 
@@ -624,7 +675,7 @@ void checkRelayCommands() {
     }
 
   } else {
-    Serial.printf("Check command HTTP error/status: %d\n", code);
+    Serial.printf("Check command HTTPS error/status: %d\n", code);
   }
 
   httpBusy = false;
@@ -649,7 +700,7 @@ void sendPing() {
   if (code > 0) {
     Serial.printf("Ping sent, status: %d\n", code);
   } else {
-    Serial.printf("Ping HTTP error: %d\n", code);
+    Serial.printf("Ping HTTPS error: %d\n", code);
   }
 
   httpBusy = false;
@@ -721,7 +772,11 @@ void updateLCD() {
       lcd.print(relayStates.r2 ? "ON " : "OFF");
 
       lcd.setCursor(0, 1);
-      lcd.print("Buzzer:");
+      lcd.print("R3:");
+      lcd.print(relayStates.r3 ? "ON " : "OFF");
+
+      lcd.setCursor(8, 1);
+      lcd.print("B:");
       lcd.print(overTempAlarm ? "ON " : "OFF");
       break;
   }
@@ -794,7 +849,6 @@ void loop() {
     handleOverTemperature();
   }
 
-  // Interval dinamis saat fan ON
   unsigned long relayInterval = motorStates.fan ? RELAY_CHECK_INTERVAL_FAN_ON : RELAY_CHECK_INTERVAL;
   unsigned long sensorInterval = motorStates.fan ? SENSOR_SEND_INTERVAL_FAN_ON : SENSOR_SEND_INTERVAL;
 
