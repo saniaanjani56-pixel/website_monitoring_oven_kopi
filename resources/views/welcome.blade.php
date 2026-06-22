@@ -637,6 +637,26 @@
                 width: 100%;
                 justify-content: space-between;
             }
+            .pagination {
+                align-items: stretch;
+                flex-direction: column;
+                gap: 12px;
+                padding: 16px;
+            }
+            .pagination-info {
+                text-align: center;
+            }
+            .pagination-controls {
+                width: 100%;
+                overflow-x: auto;
+                padding-bottom: 4px;
+                scroll-behavior: smooth;
+                -webkit-overflow-scrolling: touch;
+            }
+            .pagination-btn {
+                flex: 0 0 auto;
+                touch-action: manipulation;
+            }
         }
     </style>
 </head>
@@ -850,6 +870,7 @@
         let currentPage = Math.max(1, parseInt(sessionStorage.getItem('sensorTablePage') || '1', 10));
         let itemsPerPage = 10;
         let lastTableSensorId = 0;
+        let lastPaginationMarkup = '';
         let eventSource = null;
         let esp32Online = false;
         let esp32LastSeen = null;
@@ -1032,7 +1053,10 @@
 
             const totalPages = Math.max(1, Math.ceil(dataHistory.length / itemsPerPage));
             setCurrentPage(Math.min(currentPage, totalPages));
-            renderTable();
+            // Saat pengguna membaca halaman lama, jangan ganti baris yang sedang dilihat.
+            if (currentPage === 1) {
+                renderTable();
+            }
             updatePaginationControls();
             return true;
         }
@@ -1075,18 +1099,28 @@
             paginationInfo.innerHTML = `<i class="fas fa-list"></i> Showing <strong>${startItem}-${endItem}</strong> of <strong>${dataHistory.length}</strong> entries`;
 
             let buttonsHTML = '';
-            buttonsHTML += `<button class="pagination-btn" onclick="previousPage()" ${currentPage === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i> Previous</button>`;
+            buttonsHTML += `<button type="button" class="pagination-btn" onclick="previousPage()" ${currentPage === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i> Previous</button>`;
 
             for (let i = 1; i <= totalPages; i++) {
                 if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
-                    buttonsHTML += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+                    buttonsHTML += `<button type="button" class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
                 } else if (i === currentPage - 2 || i === currentPage + 2) {
                     buttonsHTML += '<span style="padding: 8px; color: #94a3b8;">...</span>';
                 }
             }
 
-            buttonsHTML += `<button class="pagination-btn" onclick="nextPage()" ${currentPage === totalPages || totalPages === 0 ? 'disabled' : ''}>Next <i class="fas fa-chevron-right"></i></button>`;
-            paginationControls.innerHTML = buttonsHTML;
+            buttonsHTML += `<button type="button" class="pagination-btn" onclick="nextPage()" ${currentPage === totalPages || totalPages === 0 ? 'disabled' : ''}>Next <i class="fas fa-chevron-right"></i></button>`;
+
+            // Jangan buat ulang tombol jika state-nya tidak berubah. Ini mencegah
+            // horizontal scroll mobile kembali ke tombol halaman 1 setiap SSE masuk.
+            if (lastPaginationMarkup !== buttonsHTML) {
+                const previousScrollLeft = paginationControls.scrollLeft;
+                paginationControls.innerHTML = buttonsHTML;
+                lastPaginationMarkup = buttonsHTML;
+                requestAnimationFrame(() => {
+                    paginationControls.scrollLeft = previousScrollLeft;
+                });
+            }
         }
 
         function setCurrentPage(page) {
