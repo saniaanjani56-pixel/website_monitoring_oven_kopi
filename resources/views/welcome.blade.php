@@ -849,6 +849,7 @@
         let dataHistory = [];
         let currentPage = 1;
         let itemsPerPage = 10;
+        let lastTableSensorId = 0;
         let eventSource = null;
         let esp32Online = false;
         let esp32LastSeen = null;
@@ -998,12 +999,23 @@
             monitoringChart.update();
         }
 
-        function updateTable(temp, hum) {
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString('id-ID', { hour12: false });
-            const uptimeStr = formatUptime(timerSeconds);
+        function updateTable(temp, hum, sensorId, timestamp) {
+            const numericSensorId = Number(sensorId);
+
+            // SSE terkoneksi ulang setiap 500ms. Abaikan pembacaan yang sudah ada.
+            if (!Number.isFinite(numericSensorId) || numericSensorId <= lastTableSensorId) {
+                return false;
+            }
+
+            const sensorTime = timestamp ? new Date(timestamp) : new Date();
+            const timeStr = sensorTime.toLocaleTimeString('id-ID', { hour12: false });
+            const timerRemaining = timerRunning && timerDeadlineMs
+                ? Math.max(0, Math.ceil((timerDeadlineMs - Date.now()) / 1000))
+                : null;
+            const uptimeStr = timerRemaining === null ? '-' : formatUptime(timerRemaining);
 
             const newData = {
+                sensorId: numericSensorId,
                 time: timeStr,
                 temp: temp.toFixed(1),
                 hum: hum.toFixed(1),
@@ -1012,14 +1024,17 @@
             };
 
             dataHistory.unshift(newData);
+            lastTableSensorId = numericSensorId;
 
             if (dataHistory.length > 100) {
                 dataHistory.pop();
             }
 
-            currentPage = 1;
+            const totalPages = Math.max(1, Math.ceil(dataHistory.length / itemsPerPage));
+            currentPage = Math.min(currentPage, totalPages);
             renderTable();
             updatePaginationControls();
+            return true;
         }
 
         function renderTable() {
@@ -1329,6 +1344,7 @@
                     dataHistory = result.data.map(item => {
                         const time = new Date(item.created_at);
                         return {
+                            sensorId: Number(item.id),
                             time: time.toLocaleTimeString('id-ID', { hour12: false }),
                             temp: item.temperature,
                             hum: item.humidity,
@@ -1337,6 +1353,10 @@
                         };
                     });
 
+                    lastTableSensorId = dataHistory.reduce(
+                        (latestId, item) => Math.max(latestId, item.sensorId || 0),
+                        0
+                    );
                     currentPage = 1;
                     renderTable();
                     updatePaginationControls();
@@ -1355,8 +1375,9 @@
                     const temp = data.sensorData.temp;
                     const hum = data.sensorData.hum;
                     updateSensorDisplay(temp, hum);
-                    updateChart(temp, hum);
-                    updateTable(temp, hum);
+                    if (updateTable(temp, hum, data.sensorData.id, data.sensorData.timestamp)) {
+                        updateChart(temp, hum);
+                    }
                 }
 
                 // Update relay states
@@ -1427,8 +1448,9 @@
         function handleSSEMessage(data) {
             if (data.sensor) {
                 updateSensorDisplay(data.sensor.temp, data.sensor.hum);
-                updateChart(data.sensor.temp, data.sensor.hum);
-                updateTable(data.sensor.temp, data.sensor.hum);
+                if (updateTable(data.sensor.temp, data.sensor.hum, data.sensor.id, data.sensor.timestamp)) {
+                    updateChart(data.sensor.temp, data.sensor.hum);
+                }
             }
 
             if (data.relays) {

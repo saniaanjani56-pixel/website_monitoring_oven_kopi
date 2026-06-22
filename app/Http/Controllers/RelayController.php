@@ -84,13 +84,17 @@ class RelayController extends Controller
         // Ambil last sensor data dari cache (yang dikirim ESP32)
         $lastTemp = Cache::get('last_temp', 0);
         $lastHum = Cache::get('last_hum', 0);
+        $lastSensorId = Cache::get('last_sensor_id');
+        $lastSensorAt = Cache::get('last_sensor_at');
 
         // Return data
         return response()->json([
             'connected' => true,
             'sensorData' => [
+                'id' => $lastSensorId,
                 'temp' => $lastTemp,
-                'hum' => $lastHum
+                'hum' => $lastHum,
+                'timestamp' => $lastSensorAt,
             ],
             'relayStates' => $relayStates,
             'fan_state' => $fanState,
@@ -226,17 +230,21 @@ class RelayController extends Controller
                 'hum' => 'required|numeric',
             ]);
 
+            $receivedAt = now();
+
             // Simpan ke database tabel sensor_data
-            DB::table('sensor_data')->insert([
+            $sensorId = DB::table('sensor_data')->insertGetId([
                 'temperature' => $data['temp'],
                 'humidity' => $data['hum'],
-                'created_at' => now(),
-                'updated_at' => now(),
+                'created_at' => $receivedAt,
+                'updated_at' => $receivedAt,
             ]);
 
             // Simpan last sensor data ke cache juga (untuk quick access)
             Cache::put('last_temp', $data['temp'], now()->addHour());
             Cache::put('last_hum', $data['hum'], now()->addHour());
+            Cache::put('last_sensor_id', $sensorId, now()->addHour());
+            Cache::put('last_sensor_at', $receivedAt->toISOString(), now()->addHour());
 
             return response()->json([
                 'success' => true,
@@ -314,9 +322,10 @@ class RelayController extends Controller
 
             // Ambil data terbaru dari cache
             $currentData = [
+                'id' => Cache::get('last_sensor_id'),
                 'temp' => Cache::get('last_temp', 0),
                 'hum' => Cache::get('last_hum', 0),
-                'timestamp' => now()->toDateTimeString()
+                'timestamp' => Cache::get('last_sensor_at'),
             ];
 
             $relayStates = $this->getRelayStates();

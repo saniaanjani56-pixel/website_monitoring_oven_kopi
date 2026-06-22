@@ -71,4 +71,23 @@ class HeaterTimerTest extends TestCase
             ->assertJsonPath('relayStates.r2', 0)
             ->assertJsonPath('relayStates.r3', 0);
     }
+
+    public function test_latest_sensor_response_contains_stable_sensor_identity(): void
+    {
+        $this->postJson('/api/sensor-data', [
+            'temp' => 31.5,
+            'hum' => 62.4,
+        ])->assertOk();
+
+        $response = $this->getJson('/api/sensors')
+            ->assertOk()
+            ->assertJsonPath('sensorData.temp', 31.5)
+            ->assertJsonPath('sensorData.hum', 62.4)
+            ->assertJsonStructure([
+                'sensorData' => ['id', 'timestamp'],
+            ]);
+
+        $this->assertIsInt($response->json('sensorData.id'));
+        $this->assertNotNull($response->json('sensorData.timestamp'));
+    }
 }
