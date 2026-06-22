@@ -378,6 +378,43 @@
             font-family: 'Courier New', monospace;
             letter-spacing: 4px;
         }
+        .timer-inputs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin: 18px 0 8px;
+        }
+        .timer-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .timer-input-group label {
+            color: #64748b;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+        }
+        .timer-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            color: #1e293b;
+            font-size: 18px;
+            font-weight: 700;
+            text-align: center;
+        }
+        .timer-input:disabled {
+            background: #f1f5f9;
+            color: #94a3b8;
+        }
+        .timer-status {
+            min-height: 20px;
+            color: #64748b;
+            font-size: 12px;
+            text-align: center;
+        }
         .timer-controls {
             display: flex;
             justify-content: center;
@@ -412,6 +449,10 @@
         .play-btn.playing::before {
             border-left: 8px solid white;
             border-right: 8px solid white;
+        }
+        .play-btn:disabled {
+            cursor: wait;
+            opacity: 0.6;
         }
 
         /* Monitoring */
@@ -721,8 +762,23 @@
                 </div>
                 <div class="card-body">
                     <div class="timer-display" id="timerDisplay">00:00:00</div>
+                    <div class="timer-inputs">
+                        <div class="timer-input-group">
+                            <label for="timerHours">Jam</label>
+                            <input class="timer-input" id="timerHours" type="number" min="0" max="168" value="0">
+                        </div>
+                        <div class="timer-input-group">
+                            <label for="timerMinutes">Menit</label>
+                            <input class="timer-input" id="timerMinutes" type="number" min="0" max="59" value="0">
+                        </div>
+                        <div class="timer-input-group">
+                            <label for="timerSeconds">Detik</label>
+                            <input class="timer-input" id="timerSeconds" type="number" min="0" max="59" value="0">
+                        </div>
+                    </div>
+                    <div class="timer-status" id="timerStatus">Pilih heater, masukkan durasi, lalu mulai.</div>
                     <div class="timer-controls">
-                        <div class="play-btn" id="playBtn" onclick="toggleTimer()"></div>
+                        <button class="play-btn" id="playBtn" type="button" onclick="toggleTimer()" aria-label="Mulai timer"></button>
                     </div>
                 </div>
             </div>
@@ -787,7 +843,7 @@
         let fanState = false;
         let fanSpeed = 0;
         let timerRunning = false;
-        let timerSeconds = 0;
+        let timerDeadlineMs = null;
         let timerInterval = null;
 
         let dataHistory = [];
@@ -1151,19 +1207,99 @@
             }
         }
 
-        function toggleTimer() {
-            timerRunning = !timerRunning;
+        function renderTimer() {
+            const remainingSeconds = timerRunning && timerDeadlineMs
+                ? Math.max(0, Math.ceil((timerDeadlineMs - Date.now()) / 1000))
+                : 0;
+
+            document.getElementById('timerDisplay').textContent = formatUptime(remainingSeconds);
+
+            if (timerRunning && remainingSeconds === 0) {
+                timerRunning = false;
+                timerDeadlineMs = null;
+                updateTimerControls();
+                document.getElementById('timerStatus').textContent = 'Waktu habis. Semua heater dimatikan.';
+                refreshData();
+            }
+        }
+
+        function updateTimerControls() {
             const playBtn = document.getElementById('playBtn');
+            const inputs = document.querySelectorAll('.timer-input');
+
+            playBtn.classList.toggle('playing', timerRunning);
+            playBtn.setAttribute('aria-label', timerRunning ? 'Hentikan timer' : 'Mulai timer');
+            inputs.forEach(input => input.disabled = timerRunning);
+        }
+
+        function updateTimerState(timer) {
+            if (!timer) return;
+
+            timerRunning = timer.active === true || timer.active === 1;
+            const remaining = Math.max(0, parseInt(timer.remaining_seconds || 0, 10));
+            timerDeadlineMs = timerRunning ? Date.now() + (remaining * 1000) : null;
+
+            updateTimerControls();
+            renderTimer();
 
             if (timerRunning) {
-                playBtn.classList.add('playing');
-                timerInterval = setInterval(() => {
-                    timerSeconds++;
-                    document.getElementById('timerDisplay').textContent = formatUptime(timerSeconds);
-                }, 1000);
-            } else {
-                playBtn.classList.remove('playing');
-                clearInterval(timerInterval);
+                document.getElementById('timerStatus').textContent = 'Timer aktif. Tekan tombol untuk menghentikan dan mematikan heater.';
+            }
+
+            if (!timerInterval) {
+                timerInterval = setInterval(renderTimer, 250);
+            }
+        }
+
+        async function toggleTimer() {
+            const playBtn = document.getElementById('playBtn');
+            playBtn.disabled = true;
+
+            try {
+                if (timerRunning) {
+                    const response = await fetch('/api/heater-timer', { method: 'DELETE' });
+                    const result = await response.json();
+
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.message || result.error || 'Gagal menghentikan timer');
+                    }
+
+                    relayStates = result.relayStates || relayStates;
+                    updateTimerState(result.timer);
+                    document.getElementById('timerStatus').textContent = 'Timer dihentikan. Semua heater dimatikan.';
+                    await refreshData();
+                    return;
+                }
+
+                const hours = parseInt(document.getElementById('timerHours').value || 0, 10);
+                const minutes = parseInt(document.getElementById('timerMinutes').value || 0, 10);
+                const seconds = parseInt(document.getElementById('timerSeconds').value || 0, 10);
+                const durationSeconds = (hours * 3600) + (minutes * 60) + seconds;
+
+                if (hours < 0 || hours > 168 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59 || durationSeconds < 1 || durationSeconds > 604800) {
+                    throw new Error('Durasi harus antara 1 detik dan 7 hari.');
+                }
+
+                if (!Object.values(relayStates).some(state => state === 1)) {
+                    throw new Error('Aktifkan minimal satu heater sebelum memulai timer.');
+                }
+
+                const response = await fetch('/api/heater-timer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ duration_seconds: durationSeconds })
+                });
+                const result = await response.json();
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || result.error || 'Gagal memulai timer');
+                }
+
+                updateTimerState(result.timer);
+            } catch (error) {
+                document.getElementById('timerStatus').textContent = error.message;
+            } finally {
+                playBtn.disabled = false;
             }
         }
 
@@ -1253,6 +1389,12 @@
                         document.getElementById('speedValue').textContent = fanSpeed;
                     }
                 }
+
+                updateTimerState({
+                    active: data.timer_active,
+                    ends_at: data.timer_ends_at,
+                    remaining_seconds: data.timer_remaining
+                });
             } catch (e) {
                 console.error('Failed to fetch sensor data:', e);
             }
@@ -1322,6 +1464,10 @@
 
             if (data.esp32) {
                 updateEsp32Status(data.esp32.online, data.esp32.last_seen);
+            }
+
+            if (data.timer) {
+                updateTimerState(data.timer);
             }
         }
 

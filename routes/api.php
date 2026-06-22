@@ -20,6 +20,8 @@ Route::post('/sensor-data', [RelayController::class, 'receiveSensorData']);
 Route::get('/sensors', [RelayController::class, 'getSensorData']);
 Route::post('/relay', [RelayController::class, 'setRelay']);
 Route::post('/motor', [RelayController::class, 'setMotor']);
+Route::post('/heater-timer', [RelayController::class, 'startHeaterTimer']);
+Route::delete('/heater-timer', [RelayController::class, 'stopHeaterTimer']);
 
 // Endpoint untuk history data dari database
 Route::get('/sensor-history', [RelayController::class, 'getSensorHistory']);

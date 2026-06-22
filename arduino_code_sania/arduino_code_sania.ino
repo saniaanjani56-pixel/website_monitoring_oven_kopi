@@ -7,8 +7,8 @@
 #include <Wire.h>
 
 // ==================== WIFI CREDENTIALS ====================
-const char* ssid = "CYCLONE";
-const char* password = "12341234";
+const char* ssid = "sania";
+const char* password = "00005555";
 
 // ==================== LARAVEL SERVER HTTPS ====================
 // Domain Laravel kamu
@@ -60,7 +60,7 @@ const unsigned long LCD_UPDATE_INTERVAL = 1000;
 // ==================== RELAY PINS ====================
 const int relay1 = 32;
 const int relay2 = 33;
-const int relay3 = 25; // Ubah sesuai wiring heater 3 jika memakai pin lain.
+const int relay3 = 14; // Ubah sesuai wiring heater 3 jika memakai pin lain.
 
 // RELAY AKTIF HIGH
 #define RELAY_ON  HIGH
@@ -74,7 +74,7 @@ const int buzzerPin = 26;
 #define BUZZER_OFF HIGH
 
 // ==================== SAFETY LIMIT ====================
-const float TEMP_LIMIT = 65.0;
+const float TEMP_LIMIT = 58.0;
 bool overTempAlarm = false;
 
 // ==================== L298N MOTOR DRIVER PINS ====================

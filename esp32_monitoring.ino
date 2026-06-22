@@ -90,6 +90,11 @@ struct RelayStates {
 
 RelayStates relayStates = {false, false};
 
+// ==================== HEATER TIMER ====================
+// Deadline lokal membuat heater tetap mati tepat waktu walaupun WiFi terputus.
+bool heaterTimerActive = false;
+unsigned long heaterTimerDeadline = 0;
+
 // ==================== MOTOR STATES ====================
 struct MotorStates {
   bool fan;
@@ -118,6 +123,8 @@ void sendPing();
 void updateLCD();
 void setFanMotor(bool on, int speedPercent);
 void handleHttpResult(int code);
+void turnOffAllHeaters();
+void updateHeaterTimer();
 
 // ==================== SETUP ====================
 void setup() {
@@ -399,6 +406,36 @@ void checkRelayCommands() {
       }
     }
 
+    // ==================== PARSE HEATER TIMER ====================
+    int timerActiveIdx = response.indexOf("\"timer_active\":");
+    int timerRemainingIdx = response.indexOf("\"timer_remaining\":");
+
+    if (timerActiveIdx >= 0 && timerRemainingIdx >= 0) {
+      int timerActiveStart = response.indexOf(":", timerActiveIdx) + 1;
+      int timerActiveEnd = response.indexOf(",", timerActiveStart);
+      String timerActiveValue = response.substring(timerActiveStart, timerActiveEnd);
+      timerActiveValue.trim();
+
+      int timerRemainingStart = response.indexOf(":", timerRemainingIdx) + 1;
+      int timerRemainingEnd = response.indexOf(",", timerRemainingStart);
+
+      if (timerRemainingEnd < 0) {
+        timerRemainingEnd = response.indexOf("}", timerRemainingStart);
+      }
+
+      unsigned long remainingSeconds = response.substring(timerRemainingStart, timerRemainingEnd).toInt();
+      bool newTimerActive = timerActiveValue == "true" || timerActiveValue == "1";
+
+      if (newTimerActive && remainingSeconds > 0) {
+        heaterTimerActive = true;
+        heaterTimerDeadline = millis() + (remainingSeconds * 1000UL);
+        Serial.printf("Heater timer active, remaining: %lu seconds\n", remainingSeconds);
+      } else {
+        heaterTimerActive = false;
+        heaterTimerDeadline = 0;
+      }
+    }
+
     // ==================== PARSE MOTOR STATES ====================
     int fanStateIdx = response.indexOf("\"fan_state\":");
     int fanSpeedIdx = response.indexOf("\"fan_speed\":");
@@ -567,9 +604,32 @@ void setFanMotor(bool on, int speedPercent) {
   motorStates.fanSpeed = speedPercent;
 }
 
+// ==================== HEATER FAIL-SAFE ====================
+void turnOffAllHeaters() {
+  digitalWrite(relay1, RELAY_OFF);
+  digitalWrite(relay2, RELAY_OFF);
+  relayStates.r1 = false;
+  relayStates.r2 = false;
+  Serial.println("Heater timer finished, all heaters OFF");
+}
+
+void updateHeaterTimer() {
+  if (!heaterTimerActive) {
+    return;
+  }
+
+  // Perbandingan signed tetap aman ketika nilai millis() rollover.
+  if ((long)(millis() - heaterTimerDeadline) >= 0) {
+    heaterTimerActive = false;
+    heaterTimerDeadline = 0;
+    turnOffAllHeaters();
+  }
+}
+
 // ==================== MAIN LOOP ====================
 void loop() {
   unsigned long now = millis();
+  updateHeaterTimer();
   bool motorQuiet = now < motorQuietUntil;
 
   // ==================== DEBUG: CEK APA ESP32 MASIH HIDUP ====================

@@ -26,11 +26,54 @@ class RelayController extends Controller
         );
     }
 
+    private function turnOffAllHeaters(): array
+    {
+        $relayStates = $this->defaultRelayStates();
+
+        Cache::put('relay_states', $relayStates, now()->addDay());
+
+        DB::table('relay_status')->insert([
+            ...$relayStates,
+            'r4' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return $relayStates;
+    }
+
+    private function getHeaterTimerState(): array
+    {
+        $timer = array_merge([
+            'active' => false,
+            'ends_at' => null,
+        ], Cache::get('heater_timer', []));
+
+        $remainingSeconds = $timer['active'] && $timer['ends_at']
+            ? max(0, (int) $timer['ends_at'] - now()->timestamp)
+            : 0;
+
+        if ($timer['active'] && $remainingSeconds === 0) {
+            $this->turnOffAllHeaters();
+            $timer = ['active' => false, 'ends_at' => null];
+            Cache::put('heater_timer', $timer, now()->addDay());
+        }
+
+        return [
+            'active' => (bool) $timer['active'],
+            'ends_at' => $timer['ends_at'],
+            'remaining_seconds' => $remainingSeconds,
+        ];
+    }
+
     /**
      * Get sensor data (ESP32 & Frontend polling this endpoint)
      */
     public function getSensorData()
     {
+        // Mengecek deadline juga memastikan relay server menjadi OFF saat timer habis.
+        $timer = $this->getHeaterTimerState();
+
         // Ambil relay states dari cache
         $relayStates = $this->getRelayStates();
 
@@ -51,7 +94,58 @@ class RelayController extends Controller
             ],
             'relayStates' => $relayStates,
             'fan_state' => $fanState,
-            'fan_speed' => $fanSpeed
+            'fan_speed' => $fanSpeed,
+            'timer_active' => $timer['active'],
+            'timer_ends_at' => $timer['ends_at'],
+            'timer_remaining' => $timer['remaining_seconds'],
+        ]);
+    }
+
+    /**
+     * Mulai countdown heater. Status relay yang sedang dipilih tetap digunakan.
+     */
+    public function startHeaterTimer(Request $request)
+    {
+        $data = $request->validate([
+            'duration_seconds' => 'required|integer|min:1|max:604800',
+        ]);
+
+        $relayStates = $this->getRelayStates();
+        if (!collect($relayStates)->contains(fn ($state) => (int) $state === 1)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aktifkan minimal satu heater sebelum memulai timer.',
+            ], 422);
+        }
+
+        $timer = [
+            'active' => true,
+            'ends_at' => now()->addSeconds($data['duration_seconds'])->timestamp,
+        ];
+
+        Cache::put('heater_timer', $timer, now()->addDays(8));
+
+        return response()->json([
+            'success' => true,
+            'timer' => $this->getHeaterTimerState(),
+            'relayStates' => $relayStates,
+        ]);
+    }
+
+    /**
+     * Batalkan countdown dan matikan semua heater.
+     */
+    public function stopHeaterTimer()
+    {
+        Cache::put('heater_timer', [
+            'active' => false,
+            'ends_at' => null,
+        ], now()->addDay());
+
+        return response()->json([
+            'success' => true,
+            'timer' => $this->getHeaterTimerState(),
+            'relayStates' => $this->turnOffAllHeaters(),
         ]);
     }
 
@@ -216,6 +310,8 @@ class RelayController extends Controller
         @ini_set('implicit_flush', 1);
 
         return response()->stream(function () {
+            $timer = $this->getHeaterTimerState();
+
             // Ambil data terbaru dari cache
             $currentData = [
                 'temp' => Cache::get('last_temp', 0),
@@ -242,6 +338,7 @@ class RelayController extends Controller
                 'relays' => $relayStates,
                 'fan_state' => $fanState,
                 'fan_speed' => $fanSpeed,
+                'timer' => $timer,
                 'esp32' => [
                     'online' => $esp32Online,
                     'last_seen' => $lastSeen
