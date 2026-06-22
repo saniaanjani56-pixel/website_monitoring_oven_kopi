@@ -847,7 +847,7 @@
         let timerInterval = null;
 
         let dataHistory = [];
-        let currentPage = 1;
+        let currentPage = Math.max(1, parseInt(sessionStorage.getItem('sensorTablePage') || '1', 10));
         let itemsPerPage = 10;
         let lastTableSensorId = 0;
         let eventSource = null;
@@ -1031,7 +1031,7 @@
             }
 
             const totalPages = Math.max(1, Math.ceil(dataHistory.length / itemsPerPage));
-            currentPage = Math.min(currentPage, totalPages);
+            setCurrentPage(Math.min(currentPage, totalPages));
             renderTable();
             updatePaginationControls();
             return true;
@@ -1089,9 +1089,14 @@
             paginationControls.innerHTML = buttonsHTML;
         }
 
+        function setCurrentPage(page) {
+            currentPage = Math.max(1, Number(page) || 1);
+            sessionStorage.setItem('sensorTablePage', currentPage.toString());
+        }
+
         function previousPage() {
             if (currentPage > 1) {
-                currentPage--;
+                setCurrentPage(currentPage - 1);
                 renderTable();
                 updatePaginationControls();
             }
@@ -1100,14 +1105,14 @@
         function nextPage() {
             const totalPages = Math.ceil(dataHistory.length / itemsPerPage);
             if (currentPage < totalPages) {
-                currentPage++;
+                setCurrentPage(currentPage + 1);
                 renderTable();
                 updatePaginationControls();
             }
         }
 
         function goToPage(page) {
-            currentPage = page;
+            setCurrentPage(page);
             renderTable();
             updatePaginationControls();
         }
@@ -1357,7 +1362,8 @@
                         (latestId, item) => Math.max(latestId, item.sensorId || 0),
                         0
                     );
-                    currentPage = 1;
+                    const totalPages = Math.max(1, Math.ceil(dataHistory.length / itemsPerPage));
+                    setCurrentPage(Math.min(currentPage, totalPages));
                     renderTable();
                     updatePaginationControls();
                 }
